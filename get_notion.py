@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from nltk.probability import FreqDist
 from sklearn.feature_extraction.text import CountVectorizer
 from sentence_transformers import SentenceTransformer
+import fasttext.util
 
 from gensim.summarization import summarize
 import trafilatura
@@ -22,9 +23,18 @@ import yake
 import nltk   
 import pytextrank
 from icecream import ic
+import requests
+import io
+import PyPDF2
+from PyPDF2 import PdfFileReader
 
 nltk.download('punkt')
 nltk.download('stopwords')
+
+
+# Extract keywords with Yake
+kw_extractor = yake.KeywordExtractor()
+
 
 # Notion only
 token = 'secret_SLpSNU22LjOaAgCVYVDMxlpJvYlyX6PsPxwgX9fAUyv'
@@ -43,25 +53,32 @@ data = Filter.QueryDatabase(query.QueryProperty(property_name='URL',
 
 result = req.post(url=database_query(database_id=database_id), data=data)
 
-# Extract keywords
-kw_extractor = yake.KeywordExtractor()
-
-dot = graphviz.Digraph(comment='The Round Table')   
 
 for res in result['results']:
     url = res['properties']['URL']['url']
-
-    print("################################", url, "########################################")
-    try:
-        downloaded = trafilatura.fetch_url(url)
-        text = trafilatura.extract(downloaded)
-        print(text)
-    except:
-        print("Error retrieving the page")
+    autotagged = res['properties']['Autotagged']['checkbox']
+    if autotagged is True:
         continue
-    
+    # 
+    print("################################",autotagged, "-----", url, "########################################")
+    if url.endswith('pdf'):
+        print("We have a pdf")
+        r = requests.get(url)
+        f = io.BytesIO(r.content)
+        reader = PdfFileReader(f)
+        text = reader.getPage(0).extractText()
+    else:
+        try:
+            downloaded = trafilatura.fetch_url(url)
+            text = trafilatura.extract(downloaded)
+        except:
+            print("Error retrieving the page")
+
     if not text:
         continue
+
+    ic(text)
+
     n_gram_range = (1, 2)
     stop_words = "english"
 
@@ -80,8 +97,8 @@ for res in result['results']:
     # keywords = [candidates[index] for index in distances.argsort()[0][-top_n:]]
     # print(keywords)
     
-    ic(scoring.mmr(doc_embedding, candidate_embeddings, candidates, 5, 10))
-    ic(scoring.max_sum_similarity(doc_embedding, candidate_embeddings, candidates, 5, 10))
+    ic(scoring.mmr(doc_embedding, candidate_embeddings, candidates, 5, 5))
+    ic(scoring.max_sum_similarity(doc_embedding, candidate_embeddings, candidates, 5, 5))
 
     print("Processing with YAKE")
     from yake import KeywordExtractor as Yake
@@ -92,31 +109,32 @@ for res in result['results']:
 
     print("Text rank ")
     import spacy
-
+    retained_keywords = []
     nlp = spacy.load("en_core_web_sm")
     nlp.add_pipe("textrank", config={ "stopwords": { "word": ["NOUN"] } })
     doc = nlp(text)
-    for phrase in doc._.phrases[:10]:
+    for phrase in doc._.phrases[:5]:
         ic(phrase)
+        retained_keywords.append(phrase.text)
     print("================== ")
 
     nlp = spacy.load("en_core_web_sm")
     nlp.add_pipe("topicrank")
     doc = nlp(text)
-    for phrase in doc._.phrases[:10]:
+    for phrase in doc._.phrases[:5]:
         ic(phrase)
 
-    # import topicrank
+    existing_tags = ic(res['properties']['Tags']['multi_select'])
 
-    # # created a directed graph
-    # graph=nx.gnp_random_graph(25,0.6,directed=True)
-    # #draw a graph
-    # nx.draw(graph,with_labels=True,font_color='red',font_size=10,node_color='yellow')
-    # #plot a graph
-    # plt.show()
-    
-    # for j in range(len(text)):
-    #     tr = topicrank.TopicRank(text[j])
-    #     print("Keywords of article", str(j+1), "\n", tr.get_top_n(n=5, extract_strategy='first'))
+    new_tags = []
+    for name in retained_keywords:
+        new_tags.append(prop.MultiSelectOption(name=name))
+    for old_tag in existing_tags:
+        ic(old_tag)
+        new_tags.append(prop.MultiSelectOption(name=old_tag['name']))
 
+    page_prop_data = Page(properties=prop.MultiSelect('Tags', new_tags))
+    req.patch(url=page_update(res['id']), data=page_prop_data)
 
+    page_prop_data = Page(properties=Properties(prop.CheckBox('Autotagged', True)))
+    req.patch(url=page_update(res['id']), data=page_prop_data)
