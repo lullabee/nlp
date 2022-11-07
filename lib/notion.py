@@ -2,13 +2,13 @@ from potion import NotionHeader, Request
 from potion.api import *
 from potion.objects import *
 from icecream import ic
+import json
 
 token = 'secret_SLpSNU22LjOaAgCVYVDMxlpJvYlyX6PsPxwgX9fAUyv'
 nh = NotionHeader(authorization=token)
 req = Request(nh.headers)
 
 def getLinksFromNotionDatabase(database_id):
-    
     data = Filter.QueryDatabase(query.QueryProperty(property_name='URL',
                                 property_type=FilterProperty.rich_text,
                                 conditions=FilterCondition.Text.is_not_empty,
@@ -18,10 +18,20 @@ def getLinksFromNotionDatabase(database_id):
     return result
 
 
+def notionExtractDatabaseTags(database_id, field_tags = 'Tags'):
+    database = req.get(url=database_retrieve(database_id))
+    if not database:
+        print("Cannot open database")
+        exit
+    tags_name = []
+    for item in database['properties'][field_tags]['multi_select']['options']:
+        tags_name.append(item['name'])
+    return tags_name
 
-def notionSetAutotag(id):
+
+def notionSetAutotag(item_id):
     page_prop_data = Page(properties=Properties(prop.CheckBox('Autotagged', True)))
-    req.patch(url=page_update(id), data=page_prop_data)
+    req.patch(url=page_update(item_id), data=page_prop_data)
 
 def notionSetAutoKeywords(notion_item, keywords):
     # existing_tags = notion_item['properties']['AutoTags']['multi_select']
@@ -35,5 +45,5 @@ def notionSetAutoKeywords(notion_item, keywords):
     try:
         req.patch(url=page_update(notion_item['id']), data=page_prop_data)
     except:
-        ic("C'est la merde")
+        ic("Failed to set Autotags")
 
